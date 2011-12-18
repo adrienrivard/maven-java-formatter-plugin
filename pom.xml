@@ -4,7 +4,7 @@
 	<groupId>com.googlecode.maven-java-formatter-plugin</groupId>
 	<artifactId>maven-java-formatter-plugin</artifactId>
 	<packaging>maven-plugin</packaging>
-	<version>0.4-SNAPSHOT</version>
+	<version>0.4.0.e371sr1</version>
 	<name>Maven2 Java Formatter Plugin</name>
 	
 	<description>Plugin for formatting Java source code</description>
@@ -17,6 +17,14 @@
 			<distribution>repo</distribution>
 		</license>
 	</licenses>
+	
+    <repositories>
+      <repository>
+        <id>maven-java-formatter-plugin-github-fork</id>
+        <name>Maven2 Java Formatter Plugin (GitHub Fork) Repository</name>
+        <url>https://raw.github.com/benalexau/maven-java-formatter-plugin/master/releases/</url>
+      </repository>
+    </repositories>
 	
 	<issueManagement>
 		<system>Google Code</system>
@@ -46,41 +54,92 @@
 		<dependencies>
 			<dependency>
 				<groupId>org.eclipse.core</groupId>
-				<artifactId>commands</artifactId>
-				<version>3.3.0-I20070605-0010</version>
-			</dependency>
-			<dependency>
-				<groupId>org.eclipse</groupId>
-				<artifactId>osgi</artifactId>
-				<version>3.3.0-v20070530</version>
-			</dependency>
-			<dependency>
-				<groupId>org.eclipse.equinox</groupId>
-				<artifactId>common</artifactId>
-				<version>3.3.0-v20070426</version>
+				<artifactId>org.eclipse.core.contenttype</artifactId>
+				<version>3.4.100</version>
 			</dependency>
 			<dependency>
 				<groupId>org.eclipse.core</groupId>
-				<artifactId>jobs</artifactId>
-				<version>3.3.0-v20070423</version>
-			</dependency>
-			<dependency>
-				<groupId>org.eclipse.equinox</groupId>
-				<artifactId>registry</artifactId>
-				<version>3.3.0-v20070522</version>
-			</dependency>
-			<dependency>
-				<groupId>org.eclipse.equinox</groupId>
-				<artifactId>preferences</artifactId>
-				<version>3.2.100-v20070522</version>
+				<artifactId>org.eclipse.core.expressions</artifactId>
+				<version>3.4.300</version>
 			</dependency>
 			<dependency>
 				<groupId>org.eclipse.core</groupId>
-				<artifactId>contenttype</artifactId>
-				<version>3.2.100-v20070319</version>
+				<artifactId>org.eclipse.core.filesystem</artifactId>
+				<version>1.3.100</version>
+			</dependency>
+			<dependency>
+				<groupId>org.eclipse.core</groupId>
+				<artifactId>org.eclipse.core.jobs</artifactId>
+				<version>3.5.100</version>
+			</dependency>
+			<dependency>
+				<groupId>org.eclipse.core</groupId>
+				<artifactId>org.eclipse.core.resources</artifactId>
+				<version>3.7.100</version>
+			</dependency>
+			<dependency>
+				<groupId>org.eclipse.core</groupId>
+				<artifactId>org.eclipse.core.runtime</artifactId>
+				<version>3.7.0</version>
+				<!-- <scope>runtime</scope> -->
+				<exclusions>
+					<exclusion>
+						<groupId>org.eclipse.equinox</groupId>
+						<artifactId>org.eclipse.equinox.app</artifactId>
+					</exclusion>
+				</exclusions>
+			</dependency>
+			<dependency>
+				<groupId>org.eclipse.equinox</groupId>
+				<artifactId>org.eclipse.equinox.common</artifactId>
+				<version>3.6.0</version>
+			</dependency>
+			<dependency>
+				<groupId>org.eclipse.equinox</groupId>
+				<artifactId>org.eclipse.equinox.preferences</artifactId>
+				<version>3.4.1</version>
+			</dependency>
+			<dependency>
+				<groupId>org.eclipse.equinox</groupId>
+				<artifactId>org.eclipse.equinox.registry</artifactId>
+				<version>3.5.101</version>
+			</dependency>
+			<dependency>
+				<groupId>org.eclipse.jdt</groupId>
+				<artifactId>org.eclipse.jdt.core</artifactId>
+				<version>3.7.1</version>
+				<scope>compile</scope>
+				<exclusions>
+					<exclusion>
+						<groupId>org.eclipse.text</groupId>
+						<artifactId>org.eclipse.text</artifactId>
+					</exclusion>
+				</exclusions>
+			</dependency>
+			<dependency>
+				<groupId>org.eclipse.osgi</groupId>
+				<artifactId>org.eclipse.osgi</artifactId>
+				<version>3.7.1</version>
+			</dependency>
+			<dependency>
+				<groupId>org.eclipse.text</groupId>
+				<artifactId>org.eclipse.text</artifactId>
+				<version>3.5.101</version>
+				<scope>compile</scope>
+				<exclusions>
+					<exclusion>
+						<groupId>org.eclipse.core</groupId>
+						<artifactId>org.eclipse.core.commands</artifactId>
+					</exclusion>
+					<exclusion>
+						<groupId>org.eclipse.equinox</groupId>
+						<artifactId>org.eclipse.equinox.common</artifactId>
+					</exclusion>
+				</exclusions>
 			</dependency>
 		</dependencies>
 	</dependencyManagement>
+	
 	<dependencies>
 		<dependency>
 			<groupId>org.apache.maven</groupId>
@@ -88,34 +147,16 @@
 			<version>2.0</version>
 		</dependency>
 		<dependency>
-			<groupId>org.sonatype.tycho</groupId>
+			<groupId>org.eclipse.jdt</groupId>
 			<artifactId>org.eclipse.jdt.core</artifactId>
-			<version>3.5.2.v_981_R35x</version>
-			<scope>compile</scope>
 		</dependency>
 		<dependency>
-			<groupId>org.eclipse</groupId>
-			<artifactId>text</artifactId>
-			<version>3.3.0-v20070606-0010</version>
-			<scope>compile</scope>
-			<exclusions>
-				<exclusion>
-					<groupId>org.eclipse.equinox</groupId>
-					<artifactId>common</artifactId>
-				</exclusion>
-			</exclusions>
+			<groupId>org.eclipse.text</groupId>
+			<artifactId>org.eclipse.text</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>org.eclipse.core</groupId>
-			<artifactId>runtime</artifactId>
-			<version>3.3.100-v20070530</version>
-			<scope>runtime</scope>
-			<exclusions>
-				<exclusion>
-					<groupId>org.eclipse.equinox</groupId>
-					<artifactId>app</artifactId>
-				</exclusion>
-			</exclusions>
+			<artifactId>org.eclipse.core.runtime</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>commons-digester</groupId>

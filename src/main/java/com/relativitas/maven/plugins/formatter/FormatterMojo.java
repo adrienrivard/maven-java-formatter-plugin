@@ -432,12 +432,15 @@ public class FormatterMojo extends AbstractMojo {
 
 		String lineSeparator = getLineEnding(code);
 
-		TextEdit te = formatter.format(CodeFormatter.K_COMPILATION_UNIT + CodeFormatter.F_INCLUDE_COMMENTS, code,
-				0, code.length(), 0, lineSeparator);
+		TextEdit te = null;
+		try {
+			te = formatter.format(CodeFormatter.K_COMPILATION_UNIT + CodeFormatter.F_INCLUDE_COMMENTS, code, 0, code.length(), 0, lineSeparator);
+		} catch (RuntimeException formatFailed) {
+			log.debug("Formatting of " + file.getAbsolutePath() + " failed", formatFailed);
+		}
 		if (te == null) {
 			rc.skippedCount++;
-			log.debug("Code cannot be formatted. Possible cause "
-					+ "is unmatched source/target/compliance version.");
+			log.debug(file.getAbsolutePath() + " cannot be formatted. Possible cause is unmatched source/target/compliance version.");
 			return;
 		}
 

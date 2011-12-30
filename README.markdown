@@ -39,15 +39,3 @@ Second, enable the plugin. Please refer to the [original documentation](http://m
 
 [Ticket 18](http://code.google.com/p/maven-java-formatter-plugin/issues/detail?id=18&thanks=18&ts=1324185588) has been logged against the [original project](http://code.google.com/p/maven-java-formatter-plugin/) so they can incorporate these changes. As such, please check the ticket for updates before using this fork.
 
-#### XML File Formatting
-
-If you're interested in Java code formatting and Maven, you may also be interested in XML file formatting. The above plugin repository also includes a build of the [XML Formatter](http://code.google.com/p/xml-formatter) Maven plugin. To use this build, add the following additional plugin to your pom.xml and then refer to the [plugin documentation](http://code.google.com/p/xml-formatter/wiki/Documentation) (of course check the original project doesn't have a more recent release available):
-
-<pre>
-&lt;plugin&gt;
-  &lt;groupId&gt;org.technicalsoftwareconfigurationmanagement.maven-plugin&lt;/groupId&gt;
-  &lt;artifactId&gt;tscm-maven-plugin&lt;/artifactId&gt;
-  &lt;version&gt;2.1.0.20111218164324&lt;/version&gt;
-&lt;/plugin&gt;
-</pre>
-

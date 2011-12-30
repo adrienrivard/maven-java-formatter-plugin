@@ -37,5 +37,5 @@ Second, enable the plugin. Please refer to the [original documentation](http://m
 &lt;/plugin&gt;
 </pre>
 
-[Ticket 18](http://code.google.com/p/maven-java-formatter-plugin/issues/detail?id=18&thanks=18&ts=1324185588) has been logged against the [original project](http://code.google.com/p/maven-java-formatter-plugin/) so they can incorporate these changes. As such, please check the ticket for updates before using this fork.
+[Ticket 18](http://code.google.com/p/maven-java-formatter-plugin/issues/detail?id=18) has been logged against the [original project](http://code.google.com/p/maven-java-formatter-plugin/) so they can incorporate these changes. As such, please check the ticket for updates before using this fork.
 

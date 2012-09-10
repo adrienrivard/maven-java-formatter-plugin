@@ -287,14 +287,16 @@ public class FormatterMojo extends AbstractMojo {
 				File file = (File) files.get(i);
 				formatFile(file, rc, hashCache, basedirPath);
 			}
-
-			storeFileHashCache(hashCache);
+			if(rc.hashUpdatedCount>0) {
+				storeFileHashCache(hashCache);
+			}
 
 			long endClock = System.currentTimeMillis();
 
 			log.info("Successfully formatted: " + rc.successCount + " file(s)");
 			log.info("Fail to format        : " + rc.failCount + " file(s)");
 			log.info("Skipped               : " + rc.skippedCount + " file(s)");
+			log.debug("Writing in hashCache : " +rc.hashUpdatedCount +" file(s)");
 			log.info("Approximate time taken: "
 					+ ((endClock - startClock) / 1000) + "s");
 		}
@@ -448,8 +450,14 @@ public class FormatterMojo extends AbstractMojo {
 		te.apply(doc);
 		String formattedCode = doc.get();
 		String formattedHash = md5hash(formattedCode);
-		hashCache.setProperty(path, formattedHash);
-
+		if (cachedHash == null || !cachedHash.equals(formattedHash)) {
+			hashCache.setProperty(path, formattedHash);
+			rc.hashUpdatedCount++;
+			if(log.isDebugEnabled()) {
+				log.debug("Adding hash code to cachedHash for path " + path + ":"
+						+ formattedHash);
+				}
+		}
 		if (originalHash.equals(formattedHash)) {
 			rc.skippedCount++;
 			log.debug("Equal hash code. Not writing result to file.");
@@ -653,6 +661,7 @@ public class FormatterMojo extends AbstractMojo {
 	}
 
 	private class ResultCollector {
+		public int hashUpdatedCount;
 		private int successCount;
 		private int failCount;
 		private int skippedCount;

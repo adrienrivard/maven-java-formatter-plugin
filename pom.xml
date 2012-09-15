@@ -1,42 +1,43 @@
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
 	<modelVersion>4.0.0</modelVersion>
-	
+
 	<groupId>com.googlecode.maven-java-formatter-plugin</groupId>
 	<artifactId>maven-java-formatter-plugin</artifactId>
 	<packaging>maven-plugin</packaging>
-	<version>0.4.0.e371sr1</version>
+	<version>0.4.2.e371sr1-SNAPSHOT</version>
 	<name>Maven2 Java Formatter Plugin</name>
-	
+
 	<description>Plugin for formatting Java source code</description>
 	<url>http://maven-java-formatter-plugin.googlecode.com</url>
-	
+
 	<licenses>
- 		<license>
+		<license>
 			<name>Apache License, Version 2.0</name>
 			<url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
 			<distribution>repo</distribution>
 		</license>
 	</licenses>
-	
-    <repositories>
-      <repository>
-        <id>maven-java-formatter-plugin-github-fork</id>
-        <name>Maven2 Java Formatter Plugin (GitHub Fork) Repository</name>
-        <url>https://raw.github.com/benalexau/maven-java-formatter-plugin/master/releases/</url>
-      </repository>
-    </repositories>
-	
+
+	<repositories>
+		<repository>
+			<id>maven-java-formatter-plugin-github-fork</id>
+			<name>Maven2 Java Formatter Plugin (GitHub Fork) Repository</name>
+			<url>https://raw.github.com/benalexau/maven-java-formatter-plugin/master/releases/</url>
+		</repository>
+	</repositories>
+
 	<issueManagement>
 		<system>Google Code</system>
 		<url>http://code.google.com/p/maven-java-formatter-plugin/issues</url>
 	</issueManagement>
-	
+
 	<scm>
 		<connection>scm:svn:http://maven-java-formatter-plugin.googlecode.com/svn/trunk/</connection>
 		<developerConnection>scm:svn:https://maven-java-formatter-plugin.googlecode.com/svn/trunk/</developerConnection>
 		<url>http://maven-java-formatter-plugin.googlecode.com/svn/trunk/</url>
 	</scm>
-	
+
 	<developers>
 		<developer>
 			<id>jecki.go</id>
@@ -49,7 +50,7 @@
 			<email>matt.blanchette@gmail.com</email>
 		</developer>
 	</developers>
-	
+
 	<dependencyManagement>
 		<dependencies>
 			<dependency>
@@ -139,7 +140,7 @@
 			</dependency>
 		</dependencies>
 	</dependencyManagement>
-	
+
 	<dependencies>
 		<dependency>
 			<groupId>org.apache.maven</groupId>
@@ -173,6 +174,11 @@
 			<groupId>commons-codec</groupId>
 			<artifactId>commons-codec</artifactId>
 			<version>1.4</version>
+		</dependency>
+		<dependency>
+			<groupId>org.sonatype.plexus</groupId>
+			<artifactId>plexus-build-api</artifactId>
+			<version>0.0.7</version>
 		</dependency>
 		<dependency>
 			<groupId>org.codehaus.plexus</groupId>

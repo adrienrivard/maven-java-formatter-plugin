@@ -17,49 +17,38 @@ package com.relativitas.maven.plugins.formatter;
  * limitations under the License.
  */
 
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.logging.Log;
-import org.codehaus.plexus.components.io.fileselectors.FileSelector;
-import org.codehaus.plexus.components.io.fileselectors.IncludeExcludeFileSelector;
-import org.codehaus.plexus.components.io.resources.PlexusIoFileResource;
-import org.codehaus.plexus.components.io.resources.PlexusIoFileResourceCollection;
 import org.codehaus.plexus.resource.ResourceManager;
 import org.codehaus.plexus.resource.loader.FileResourceLoader;
 import org.codehaus.plexus.resource.loader.ResourceNotFoundException;
 import org.codehaus.plexus.util.IOUtil;
+import org.codehaus.plexus.util.PropertyUtils;
 import org.codehaus.plexus.util.ReaderFactory;
 import org.codehaus.plexus.util.StringUtils;
-import org.codehaus.plexus.util.WriterFactory;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.core.ToolFactory;
 import org.eclipse.jdt.core.formatter.CodeFormatter;
 import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.Document;
 import org.eclipse.jface.text.IDocument;
-import org.eclipse.text.edits.MalformedTreeException;
 import org.eclipse.text.edits.TextEdit;
-import org.xml.sax.SAXException;
+import org.sonatype.plexus.build.incremental.BuildContext;
 
 /**
  * A Maven plugin mojo to format Java source code using the Eclipse code
@@ -77,6 +66,13 @@ import org.xml.sax.SAXException;
  * @author Matt Blanchette
  */
 public class FormatterMojo extends AbstractMojo {
+
+	/**
+	 * BuildContext for incremental build if available (m2e).
+	 * @component
+	 */
+	private BuildContext buildContext;
+
 	private static final String CACHE_PROPERTIES_FILENAME = "maven-java-formatter-cache.properties";
 	private static final String[] DEFAULT_INCLUDES = new String[] { "**/*.java" };
 
@@ -89,6 +85,13 @@ public class FormatterMojo extends AbstractMojo {
 	static final String LINE_ENDING_LF_CHAR = "\n";
 	static final String LINE_ENDING_CRLF_CHARS = "\r\n";
 	static final String LINE_ENDING_CR_CHAR = "\r";
+
+	/**
+	 * CodeFormatter is not threadsafe,so we use one per thread.
+	 * The ExecutorService is shutdown in the main thread, so it should clean itself.
+	 * Ideally it should be a threadPool but this is overkill.
+	 */
+	public static ThreadLocal<CodeFormatter> threadLocalCodeFormatter = new ThreadLocal<CodeFormatter>();
 
 	/**
 	 * ResourceManager for retrieving the configFile resource.
@@ -144,7 +147,7 @@ public class FormatterMojo extends AbstractMojo {
 	 * @since 0.3
 	 */
 	private String[] includes;
-	
+
 	/**
 	 * List of fileset patterns for Java source locations to exclude from formatting.
 	 * Patterns are relative to the project source and test source directories.
@@ -154,7 +157,7 @@ public class FormatterMojo extends AbstractMojo {
 	 * @since 0.3
 	 */
 	private String[] excludes;
-	
+
 	/**
 	 * Java compiler source version.
 	 * 
@@ -184,8 +187,8 @@ public class FormatterMojo extends AbstractMojo {
 	 * @parameter default-value="${project.build.sourceEncoding}"
 	 * @since 0.3
 	 */
-	 private String encoding;
-	
+	private String encoding;
+
 	/**
 	 * Sets the line-ending of files after formatting. Valid values are:
 	 * <ul>
@@ -211,6 +214,12 @@ public class FormatterMojo extends AbstractMojo {
 	private String configFile;
 
 	/**
+	 * Used to switch performance profile. If the cached hash file exist, we expect only read of
+	 *  the java file else we have to try to format all the file,this is the costly operation.
+	 */
+	private boolean isCleanBuild;
+
+	/**
 	 * Sets whether compilerSource, compilerCompliance, and
 	 * compilerTargetPlatform values are used instead of those defined in the
 	 * configFile.
@@ -220,32 +229,93 @@ public class FormatterMojo extends AbstractMojo {
 	 */
 	private Boolean overrideConfigCompilerVersion;
 
-	private CodeFormatter formatter;
-
-	private PlexusIoFileResourceCollection collection;
-	
 	/**
 	 * @see org.apache.maven.plugin.AbstractMojo#execute()
 	 */
 	public void execute() throws MojoExecutionException {
 		long startClock = System.currentTimeMillis();
 
-		if (StringUtils.isEmpty(encoding)) {
-			encoding = ReaderFactory.FILE_ENCODING;
-			getLog().warn(
-				"File encoding has not been set, using platform encoding (" + encoding
-						+ ") to format source files, i.e. build is platform dependent!");
+		setupEncoding();
+		checkLineEnding();
+
+		final ResultCollector rc = new ResultCollector();
+		final Properties hashCache = readFileHashCacheFile();
+
+		formatAll(rc, hashCache);
+
+		storeFileHashCache(rc, hashCache);
+
+		long endClock = System.currentTimeMillis();
+		getLog().info("Successfully formatted: " + rc.successCount + " file(s)");
+		getLog().info("Fail to format        : " + rc.failCount + " file(s)");
+		getLog().info("Skipped               : " + rc.skippedCount + " file(s)");
+		getLog().debug(
+				"Writing in hashCache : " + rc.hashUpdatedCount + " file(s)");
+		getLog().info(
+				"Approximate time taken(" + this.getBasedirPath() + ": "
+						+ ((endClock - startClock)) + " ms");
+	}
+
+	private void formatAll(final ResultCollector rc, final Properties hashCache)
+			throws MojoExecutionException {
+		final ExecutorService service;
+		if (isCleanBuild) {
+			//This seems to be the best ratio time gained/threads
+			//More threads only reduce a little more.
+			service = Executors.newFixedThreadPool(2);
 		} else {
-			try {
-				"Test Encoding".getBytes(encoding);
-			}
-			catch (UnsupportedEncodingException e) {
-				throw new MojoExecutionException("Encoding '" + encoding + "' is not supported");
-			}
-			getLog().info("Using '" + encoding + "' encoding to format source files.");
+			service = Executors.newFixedThreadPool(1);
 		}
-		
-		if (!LINE_ENDING_AUTO.equals(lineEnding) 
+
+		formatSourceDirectory(service, rc, hashCache, sourceDirectory);
+		formatSourceDirectory(service, rc, hashCache, testSourceDirectory);
+
+		service.shutdown();
+		try {
+			//If we wait 10 minutes,something is really wrong or you have Hundreds of thousands of files.This is bad!
+			service.awaitTermination(10, TimeUnit.MINUTES);
+		} catch (InterruptedException e) {
+		}
+	}
+
+	private void formatSourceDirectory(ExecutorService service,
+			final ResultCollector rc, final Properties hashCache,
+			final File sourceDir) throws MojoExecutionException {
+		final String[] fileString = constructFileList(sourceDir);
+		for (final String string : fileString) {
+			service.execute(new Runnable() {
+				public void run() {
+					formatFile(string, rc, hashCache, sourceDir);
+				}
+			});
+		}
+	}
+
+	/**
+	 * Create a list of files to be formatted by this mojo.
+	 * This collection uses the includes and excludes to find the source files.
+	 */
+	private String[] constructFileList(File sourceDirectory)
+			throws MojoExecutionException {
+		if (sourceDirectory.exists()) {
+			org.codehaus.plexus.util.Scanner scanner = buildContext
+					.newScanner(sourceDirectory);
+			// code below is standard plexus Scanner stuff
+			if (includes != null && includes.length > 0) {
+				scanner.setIncludes(includes);
+			} else {
+				scanner.setIncludes(DEFAULT_INCLUDES);
+			}
+			scanner.setExcludes(excludes);
+			scanner.scan();
+			String[] includedFiles = scanner.getIncludedFiles();
+			return includedFiles;
+		}
+		return new String[0];
+	}
+
+	private void checkLineEnding() throws MojoExecutionException {
+		if (!LINE_ENDING_AUTO.equals(lineEnding)
 				&& !LINE_ENDING_KEEP.equals(lineEnding)
 				&& !LINE_ENDING_LF.equals(lineEnding)
 				&& !LINE_ENDING_CRLF.equals(lineEnding)
@@ -253,89 +323,27 @@ public class FormatterMojo extends AbstractMojo {
 			throw new MojoExecutionException(
 					"Unknown value for lineEnding parameter");
 		}
-
-		createResourceCollection();
-		
-		List<File> files = new ArrayList<File>();
-		try {
-			if (sourceDirectory != null && sourceDirectory.exists()
-					&& sourceDirectory.isDirectory()) {
-				collection.setBaseDir(sourceDirectory);
-				addCollectionFiles(files);
-			}
-			if (testSourceDirectory != null && testSourceDirectory.exists()
-					&& testSourceDirectory.isDirectory()) {
-				collection.setBaseDir(testSourceDirectory);
-				addCollectionFiles(files);
-			}
-		}
-		catch (IOException e) {
-			throw new MojoExecutionException("Unable to find files using includes/excludes", e);
-		}
-
-		int numberOfFiles = files.size();
-		Log log = getLog();
-		log.info("Number of files to be formatted: " + numberOfFiles);
-
-		if (numberOfFiles > 0) {
-			createCodeFormatter();
-			ResultCollector rc = new ResultCollector();
-			Properties hashCache = readFileHashCacheFile();
-
-			String basedirPath = getBasedirPath();
-			for (int i = 0, n = files.size(); i < n; i++) {
-				File file = (File) files.get(i);
-				formatFile(file, rc, hashCache, basedirPath);
-			}
-			if(rc.hashUpdatedCount>0) {
-				storeFileHashCache(hashCache);
-			}
-
-			long endClock = System.currentTimeMillis();
-
-			log.info("Successfully formatted: " + rc.successCount + " file(s)");
-			log.info("Fail to format        : " + rc.failCount + " file(s)");
-			log.info("Skipped               : " + rc.skippedCount + " file(s)");
-			log.debug("Writing in hashCache : " +rc.hashUpdatedCount +" file(s)");
-			log.info("Approximate time taken: "
-					+ ((endClock - startClock) / 1000) + "s");
-		}
 	}
 
-	/**
-	 * Create a {@link PlexusIoFileResourceCollection} instance to be used by this mojo.
-	 * This collection uses the includes and excludes to find the source files.
-	 */
-	void createResourceCollection() {
-		collection = new PlexusIoFileResourceCollection();
-		if ( includes != null && includes.length > 0 ) {
-			collection.setIncludes(includes);
+	private void setupEncoding() throws MojoExecutionException {
+		if (StringUtils.isEmpty(encoding)) {
+			encoding = ReaderFactory.FILE_ENCODING;
+			getLog().warn(
+					"File encoding has not been set, using platform encoding ("
+							+ encoding
+							+ ") to format source files, i.e. build is platform dependent!");
 		} else {
-			collection.setIncludes(DEFAULT_INCLUDES);
+			try {
+				"Test Encoding".getBytes(encoding);
+			} catch (UnsupportedEncodingException e) {
+				throw new MojoExecutionException("Encoding '" + encoding
+						+ "' is not supported");
+			}
+			getLog().info(
+					"Using '" + encoding + "' encoding to format source files.");
 		}
-		collection.setExcludes(excludes);
-		collection.setIncludingEmptyDirectories(false);
+	}
 
-		IncludeExcludeFileSelector fileSelector = new IncludeExcludeFileSelector();
-		fileSelector.setIncludes(DEFAULT_INCLUDES);
-		collection.setFileSelectors(new FileSelector[]{fileSelector});
-	}
-	
-	/**
-	 * Add source files from the {@link PlexusIoFileResourceCollection} to the files list.
-	 * 
-	 * @param files
-	 * @throws IOException
-	 */
-	void addCollectionFiles(List<File> files) throws IOException {
-		@SuppressWarnings("unchecked")
-		Iterator<PlexusIoFileResource> resources = collection.getResources();
-		while(resources.hasNext()) {
-			  PlexusIoFileResource resource = resources.next();
-			  files.add(resource.getFile());
-		}
-	}
-	
 	private String getBasedirPath() {
 		try {
 			return basedir.getCanonicalPath();
@@ -344,43 +352,47 @@ public class FormatterMojo extends AbstractMojo {
 		}
 	}
 
-	private void storeFileHashCache(Properties props) {
-		File cacheFile = new File(targetDirectory, CACHE_PROPERTIES_FILENAME);
-		try {
-			OutputStream out = new BufferedOutputStream(new FileOutputStream(
-					cacheFile));
-			props.store(out, null);
-		} catch (FileNotFoundException e) {
-			getLog().warn("Cannot store file hash cache properties file", e);
-		} catch (IOException e) {
-			getLog().warn("Cannot store file hash cache properties file", e);
+	private void storeFileHashCache(ResultCollector rc, Properties props) {
+		if (rc.hashUpdatedCount > 0) {
+			File cacheFile = new File(targetDirectory,
+					CACHE_PROPERTIES_FILENAME);
+			OutputStream out = null;
+			try {
+				out = buildContext.newFileOutputStream(cacheFile);
+				props.store(out, null);
+				buildContext.setValue(CACHE_PROPERTIES_FILENAME, props);
+			} catch (IOException e) {
+				getLog().warn("Cannot store file hash cache properties file", e);
+				return;
+			} finally {
+				IOUtil.close(out);
+			}
 		}
 	}
 
 	private Properties readFileHashCacheFile() {
-		Properties props = new Properties();
-		Log log = getLog();
-		if (!targetDirectory.exists()) {
-			targetDirectory.mkdirs();
-		} else if (!targetDirectory.isDirectory()) {
-			log.warn("Something strange here as the "
-					+ "supposedly target directory is not a directory.");
-			return props;
-		}
-
 		File cacheFile = new File(targetDirectory, CACHE_PROPERTIES_FILENAME);
-		if (!cacheFile.exists()) {
-			return props;
+		Properties readCachedFiles = null;
+		readCachedFiles = (Properties) buildContext
+				.getValue(CACHE_PROPERTIES_FILENAME);
+		if (readCachedFiles == null || buildContext.hasDelta(cacheFile)) {
+			readCachedFiles = new Properties();
+			if (!targetDirectory.exists()) {
+				targetDirectory.mkdirs();
+			} else if (!targetDirectory.isDirectory()) {
+				getLog().warn(
+						"Something strange here as the "
+								+ "supposedly target directory is not a directory.");
+				return readCachedFiles;
+			}
+			if (cacheFile.exists()) {
+				readCachedFiles = PropertyUtils.loadProperties(cacheFile);
+				isCleanBuild = false;
+			} else {
+				isCleanBuild = true;
+			}
 		}
-
-		try {
-			props.load(new BufferedInputStream(new FileInputStream(cacheFile)));
-		} catch (FileNotFoundException e) {
-			log.warn("Cannot load file hash cache properties file", e);
-		} catch (IOException e) {
-			log.warn("Cannot load file hash cache properties file", e);
-		}
-		return props;
+		return readCachedFiles;
 	}
 
 	/**
@@ -389,19 +401,18 @@ public class FormatterMojo extends AbstractMojo {
 	 * @param hashCache
 	 * @param basedirPath
 	 */
-	private void formatFile(File file, ResultCollector rc,
-			Properties hashCache, String basedirPath) {
-		try {
-			doFormatFile(file, rc, hashCache, basedirPath);
-		} catch (IOException e) {
-			rc.failCount++;
-			getLog().warn(e);
-		} catch (MalformedTreeException e) {
-			rc.failCount++;
-			getLog().warn(e);
-		} catch (BadLocationException e) {
-			rc.failCount++;
-			getLog().warn(e);
+	private void formatFile(String fileString, ResultCollector rc,
+			Properties hashCache, File currentSourceDirectory) {
+		File file = new File(currentSourceDirectory, fileString);
+		if (!buildContext.isIncremental() || buildContext.hasDelta(file)) {
+			try {
+				buildContext.removeMessages(file);
+				doFormatFile(file, rc, hashCache);
+			} catch (Exception e) {
+				rc.failCount++;
+				buildContext.addMessage(file, 0, 0, e.getMessage(),
+						BuildContext.SEVERITY_WARNING, e);
+			}
 		}
 	}
 
@@ -416,19 +427,17 @@ public class FormatterMojo extends AbstractMojo {
 	 * @throws BadLocationException
 	 */
 	private void doFormatFile(File file, ResultCollector rc,
-			Properties hashCache, String basedirPath) throws IOException,
-			BadLocationException {
+			Properties hashCache) throws IOException, BadLocationException {
 		Log log = getLog();
-		log.debug("Processing file: " + file);
 		String code = readFileAsString(file);
 		String originalHash = md5hash(code);
 
 		String canonicalPath = file.getCanonicalPath();
-		String path = canonicalPath.substring(basedirPath.length());
+		String path = canonicalPath.substring(getBasedirPath().length());
 		String cachedHash = hashCache.getProperty(path);
 		if (cachedHash != null && cachedHash.equals(originalHash)) {
 			rc.skippedCount++;
-			log.debug("File is already formatted.");
+			log.debug(file.getAbsolutePath() + " is already formatted.");
 			return;
 		}
 
@@ -436,13 +445,20 @@ public class FormatterMojo extends AbstractMojo {
 
 		TextEdit te = null;
 		try {
-			te = formatter.format(CodeFormatter.K_COMPILATION_UNIT + CodeFormatter.F_INCLUDE_COMMENTS, code, 0, code.length(), 0, lineSeparator);
+			te = getCodeFormatter().format(
+					CodeFormatter.K_COMPILATION_UNIT
+							+ CodeFormatter.F_INCLUDE_COMMENTS, code, 0,
+					code.length(), 0, lineSeparator);
 		} catch (RuntimeException formatFailed) {
-			log.debug("Formatting of " + file.getAbsolutePath() + " failed", formatFailed);
+			log.debug("Formatting of " + file.getAbsolutePath() + " failed",
+					formatFailed);
+		} catch (MojoExecutionException e) {
+			log.debug("Formatting of " + file.getAbsolutePath() + " failed", e);
 		}
 		if (te == null) {
 			rc.skippedCount++;
-			log.debug(file.getAbsolutePath() + " cannot be formatted. Possible cause is unmatched source/target/compliance version.");
+			log.debug(file.getAbsolutePath()
+					+ " cannot be formatted. Possible cause is unmatched source/target/compliance version.");
 			return;
 		}
 
@@ -453,14 +469,15 @@ public class FormatterMojo extends AbstractMojo {
 		if (cachedHash == null || !cachedHash.equals(formattedHash)) {
 			hashCache.setProperty(path, formattedHash);
 			rc.hashUpdatedCount++;
-			if(log.isDebugEnabled()) {
-				log.debug("Adding hash code to cachedHash for path " + path + ":"
-						+ formattedHash);
-				}
+			if (log.isDebugEnabled()) {
+				log.debug("Adding hash code to cachedHash for path " + path
+						+ ":" + formattedHash);
+			}
 		}
 		if (originalHash.equals(formattedHash)) {
 			rc.skippedCount++;
-			log.debug("Equal hash code. Not writing result to file.");
+			log.debug("Equal hash code for " + path
+					+ ". Not writing result to file.");
 			return;
 		}
 
@@ -484,22 +501,14 @@ public class FormatterMojo extends AbstractMojo {
 	 * @return
 	 * @throws java.io.IOException
 	 */
-	private String readFileAsString(File file) throws java.io.IOException {
-		StringBuilder fileData = new StringBuilder(1000);
-		BufferedReader reader = null;
+	private String readFileAsString(File file) throws IOException {
+		FileInputStream input = null;
 		try {
-			reader = new BufferedReader(ReaderFactory.newReader(file, encoding));
-			char[] buf = new char[1024];
-			int numRead = 0;
-			while ((numRead = reader.read(buf)) != -1) {
-				String readData = String.valueOf(buf, 0, numRead);
-				fileData.append(readData);
-				buf = new char[1024];
-			}
+			input = new FileInputStream(file);
+			return IOUtil.toString(input);
 		} finally {
-			IOUtil.close(reader);
+			IOUtil.close(input);
 		}
-		return fileData.toString();
 	}
 
 	/**
@@ -513,13 +522,12 @@ public class FormatterMojo extends AbstractMojo {
 		if (!file.exists() && file.isDirectory()) {
 			return;
 		}
-
-		BufferedWriter bw = null;
+		OutputStream output = null;
 		try {
-			bw = new BufferedWriter(WriterFactory.newWriter(file, encoding));
-			bw.write(str);
+			output = buildContext.newFileOutputStream(file);
+			IOUtil.copy(str, output);
 		} finally {
-			IOUtil.close(bw);
+			IOUtil.close(output);
 		}
 	}
 
@@ -528,9 +536,24 @@ public class FormatterMojo extends AbstractMojo {
 	 * 
 	 * @throws MojoExecutionException
 	 */
-	private void createCodeFormatter() throws MojoExecutionException {
-		Map<String,String> options = getFormattingOptions();
-		formatter = ToolFactory.createCodeFormatter(options);
+	private CodeFormatter createCodeFormatter() throws MojoExecutionException {
+		Map<String, String> options = getFormattingOptions();
+		CodeFormatter formatter = ToolFactory.createCodeFormatter(options);
+		return formatter;
+	}
+
+	/**
+	 * Create a {@link CodeFormatter} instance to be used by this mojo.
+	 * 
+	 * @throws MojoExecutionException
+	 */
+	private CodeFormatter getCodeFormatter() throws MojoExecutionException {
+		CodeFormatter codeFormatter = threadLocalCodeFormatter.get();
+		if (codeFormatter == null) {
+			codeFormatter = createCodeFormatter();
+			threadLocalCodeFormatter.set(codeFormatter);
+		}
+		return codeFormatter;
 	}
 
 	/**
@@ -540,24 +563,29 @@ public class FormatterMojo extends AbstractMojo {
 	 * @return
 	 * @throws MojoExecutionException
 	 */
-	private Map<String,String> getFormattingOptions() throws MojoExecutionException {
-		Map<String,String> options = new HashMap<String,String>();
-		options.put(JavaCore.COMPILER_SOURCE, compilerSource);
-		options.put(JavaCore.COMPILER_COMPLIANCE, compilerCompliance);
-		options.put(JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM,
-				compilerTargetPlatform);
-
+	private Map<String, String> getFormattingOptions()
+			throws MojoExecutionException {
+		Map<String, String> config = null;
 		if (configFile != null) {
-			Map<String,String> config = getOptionsFromConfigFile();
-			if (Boolean.TRUE.equals(overrideConfigCompilerVersion)) {
-				config.remove(JavaCore.COMPILER_SOURCE);
-				config.remove(JavaCore.COMPILER_COMPLIANCE);
-				config.remove(JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM);
+			config = getOptionsFromXMLConfigFile();
+		} else {
+			File eclipseConfigFile = new File(basedir.getAbsolutePath(),
+					".settings/org.eclipse.jdt.core.prefs");
+			if (eclipseConfigFile.exists()) {
+				config = new PropertiesConfigReader().read(eclipseConfigFile);
 			}
-			options.putAll(config);
 		}
-
-		return options;
+		if (config == null) {
+			//otherwise, default eclipse formatter options
+			config = new HashMap<String, String>();
+		}
+		if (overrideConfigCompilerVersion) {
+			config.put(JavaCore.COMPILER_SOURCE, compilerSource);
+			config.put(JavaCore.COMPILER_COMPLIANCE, compilerCompliance);
+			config.put(JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM,
+					compilerTargetPlatform);
+		}
+		return config;
 	}
 
 	/**
@@ -566,41 +594,35 @@ public class FormatterMojo extends AbstractMojo {
 	 * @return
 	 * @throws MojoExecutionException
 	 */
-	private Map<String,String> getOptionsFromConfigFile() throws MojoExecutionException {
-
+	private Map<String, String> getOptionsFromXMLConfigFile()
+			throws MojoExecutionException {
 		InputStream configInput = null;
-		try {
-			resourceManager.addSearchPath(FileResourceLoader.ID, basedir
-					.getAbsolutePath());
-			configInput = resourceManager.getResourceAsInputStream(configFile);
-		} catch (ResourceNotFoundException e) {
-			throw new MojoExecutionException("Config file [" + configFile
-					+ "] cannot be found", e);
+		ConfigReader configReader = null;
+		if (configFile != null) {
+			try {
+				resourceManager.addSearchPath(FileResourceLoader.ID,
+						basedir.getAbsolutePath());
+				configInput = resourceManager
+						.getResourceAsInputStream(configFile);
+				configReader = new XmlConfigReader();
+			} catch (ResourceNotFoundException e) {
+				throw new MojoExecutionException("Config file [" + configFile
+						+ "] cannot be found", e);
+			}
 		}
-
 		if (configInput == null) {
 			throw new MojoExecutionException("Config file [" + configFile
 					+ "] does not exist");
-		} else {
-			try {
-				ConfigReader configReader = new ConfigReader();
-				return configReader.read(configInput);
-			} catch (IOException e) {
-				throw new MojoExecutionException("Cannot read config file ["
-						+ configFile + "]", e);
-			} catch (SAXException e) {
-				throw new MojoExecutionException("Cannot parse config file ["
-						+ configFile + "]", e);
-			} catch (ConfigReadException e) {
-				throw new MojoExecutionException(e.getMessage(), e);
-			} finally {
-				if (configInput != null) {
-					try {
-						configInput.close();
-					} catch (IOException e) {
-					}
-				}
-			}
+		}
+		try {
+			return configReader.read(configInput);
+		} catch (IOException e) {
+			throw new MojoExecutionException("Cannot read config file ["
+					+ configFile + "]", e);
+		} catch (ConfigReadException e) {
+			throw new MojoExecutionException(e.getMessage(), e);
+		} finally {
+			IOUtil.close(configInput);
 		}
 	}
 

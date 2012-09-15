@@ -31,4 +31,7 @@ public class ConfigReadException extends Exception {
 		super(message);
 	}
 
+	public ConfigReadException(String message,Throwable t) {
+		super(message,t);
+	}
 }

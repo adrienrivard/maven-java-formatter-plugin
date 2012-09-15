@@ -22,10 +22,8 @@ import java.util.Map;
 
 import junit.framework.TestCase;
 
-import org.xml.sax.SAXException;
-
 /**
- * Test class for {@link ConfigReader}.
+ * Test class for {@link XmlConfigReader}.
  * 
  * @author jecki
  * @author Matt Blanchette
@@ -40,13 +38,14 @@ public class ConfigReaderTest extends TestCase {
 	public void test_success_read_config() throws Exception {
 		ClassLoader cl = Thread.currentThread().getContextClassLoader();
 		InputStream in = cl.getResourceAsStream("sample-config.xml");
-		ConfigReader configReader = new ConfigReader();
-		Map config = configReader.read(in);
+		XmlConfigReader configReader = new XmlConfigReader();
+		Map<String, String> config = configReader.read(in);
 		assertNotNull(config);
 		assertEquals(264, config.keySet().size());
 		// test get one of the entry in the file
-		assertEquals("true", config
-				.get("org.eclipse.jdt.core.formatter.comment.format_html"));
+		assertEquals(
+				"true",
+				config.get("org.eclipse.jdt.core.formatter.comment.format_html"));
 	}
 
 	/**
@@ -57,11 +56,11 @@ public class ConfigReaderTest extends TestCase {
 	public void test_read_invalid_config() throws Exception {
 		ClassLoader cl = Thread.currentThread().getContextClassLoader();
 		InputStream in = cl.getResourceAsStream("sample-invalid-config.xml");
-		ConfigReader configReader = new ConfigReader();
+		XmlConfigReader configReader = new XmlConfigReader();
 		try {
 			configReader.read(in);
 			fail("Expected SAXException to be thrown");
-		} catch (SAXException e) {
+		} catch (ConfigReadException e) {
 		}
 	}
 
@@ -73,7 +72,7 @@ public class ConfigReaderTest extends TestCase {
 	public void test_read_invalid_config2() throws Exception {
 		ClassLoader cl = Thread.currentThread().getContextClassLoader();
 		InputStream in = cl.getResourceAsStream("sample-invalid-config2.xml");
-		ConfigReader configReader = new ConfigReader();
+		XmlConfigReader configReader = new XmlConfigReader();
 		try {
 			configReader.read(in);
 			fail("Expected ConfigReadException to be thrown");
